@@ -74,7 +74,8 @@ function loadConfig() {
     return {
         moemail: {
             baseUrl: '',
-            apiKey: ''
+            apiKey: '',
+            domain: ''
         },
         fingerprint: {
             browserPath: ''
@@ -411,7 +412,9 @@ class ConcurrentTask {
 // ==================== MoEmail 客户端 ====================
 class MoeMailClient {
     constructor(baseUrl, apiKey) {
-        this.baseUrl = baseUrl.replace(/\/$/, '') + '/api';
+        // 移除末尾的斜杠和可能的 /api 后缀，确保格式统一
+        const cleanUrl = baseUrl.replace(/\/$/, '').replace(/\/api$/, '');
+        this.baseUrl = cleanUrl + '/api';
         this.apiKey = apiKey;
     }
 
@@ -446,9 +449,14 @@ class MoeMailClient {
         if (!name) {
             name = Math.random().toString(36).substring(2, 12);
         }
+        const useDomain = domain || config.moemail?.domain;
+        if (!useDomain) {
+            throw new Error('未配置邮箱域名，请在 config.json 中设置 moemail.domain');
+        }
+
         return this.request('POST', '/emails/generate', {
             name,
-            domain: domain || 'isha01.ggff.net',
+            domain: useDomain,
             expiryTime: 3600000
         });
     }

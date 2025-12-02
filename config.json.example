@@ -1,7 +1,9 @@
 {
   "moemail": {
-    "baseUrl": "https://mail.example.com",
-    "apiKey": "your-api-key-here"
+    "//": "MoeMail API 地址，请勿包含 /api 后缀",
+    "baseUrl": "https://mail.your-domain.com",
+    "apiKey": "your-api-key-here",
+    "domain": "your-domain.com"
   },
   "fingerprint": {
     "browserPath": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
