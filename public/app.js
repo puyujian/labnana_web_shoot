@@ -130,6 +130,7 @@ async function loadConfig() {
         document.getElementById('moemail-url').value = data.moemail?.baseUrl || '';
         document.getElementById('moemail-domain').value = data.moemail?.domain || '';
         document.getElementById('browser-path').value = data.fingerprint?.browserPath || '';
+        document.getElementById('affiliate-url').value = data.affiliate?.redirectUrl || '';
     }
 }
 
@@ -825,6 +826,7 @@ async function autoRegister() {
                 }
             });
         }
+        
         loadStatus();
     } else {
         regLog(`注册失败: ${result.message}`, 'error');
@@ -962,6 +964,9 @@ async function saveConfig() {
         },
         proxy: {
             url: document.getElementById('proxy-url').value.trim()
+        },
+        affiliate: {
+            redirectUrl: document.getElementById('affiliate-url').value.trim()
         }
     };
     

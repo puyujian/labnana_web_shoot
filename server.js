@@ -14,6 +14,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { exec } from 'child_process';
+import puppeteer from 'puppeteer';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -83,6 +84,9 @@ function loadConfig() {
             defaultSize: '2K',
             defaultRatio: '1:1',
             interval: 2000
+        },
+        affiliate: {
+            redirectUrl: ''
         }
     };
 }
@@ -751,6 +755,105 @@ async function getImageDetail(token, imageId) {
 }
 
 // ==================== 工具函数 ====================
+
+// 使用 Puppeteer 访问推广链接（模拟真实浏览器环境）
+// 关键发现：
+// 1. labnana.com 会 302 重定向到 banana.listenhub.ai
+// 2. Cookie 需要设置到 .listenhub.ai 域名（跨子域共享）
+// 3. Cookie 值格式必须是 "Bearer {token}"（URL 编码后为 "Bearer%20{token}"）
+// 4. 最终会调用 api.listenhub.ai/api/v1/banana/invite-codes/verify 验证 aff 码
+async function visitAffiliateWithPuppeteer(affiliateUrl, token) {
+    let browser = null;
+    try {
+        console.log(`[Puppeteer] 启动浏览器...`);
+        browser = await puppeteer.launch({
+            headless: 'new', // 使用新的无头模式
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-gpu'
+            ]
+        });
+        
+        const page = await browser.newPage();
+        
+        // 设置 User-Agent
+        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+        
+        // 关键修复：Cookie 值需要加 "Bearer " 前缀，并设置到正确的域名
+        // labnana.com 会重定向到 banana.listenhub.ai，所以需要设置到 .listenhub.ai
+        const cookieValue = token.startsWith('Bearer ') ? token : `Bearer ${token}`;
+        
+        // 设置 Cookie 到多个相关域名
+        const cookieDomains = [
+            '.listenhub.ai',           // 主域名（跨子域共享）
+            'banana.listenhub.ai',     // Banana Lab 子域名
+            'api.listenhub.ai',        // API 子域名
+        ];
+        
+        for (const domain of cookieDomains) {
+            await page.setCookie({
+                name: 'app_access_token',
+                value: cookieValue,
+                domain: domain,
+                path: '/',
+                httpOnly: false,
+                secure: true,
+                sameSite: 'Lax'
+            });
+            console.log(`[Puppeteer] Cookie 已设置到域名: ${domain}`);
+        }
+        
+        // 设置 localStorage（某些网站可能使用 localStorage 存储 Token）
+        // 注意：localStorage 是域名隔离的，需要在目标页面设置
+        await page.evaluateOnNewDocument((cookieValue) => {
+            localStorage.setItem('app_access_token', cookieValue);
+            localStorage.setItem('token', cookieValue);
+        }, cookieValue);
+        
+        console.log(`[Puppeteer] 访问推广链接: ${affiliateUrl}`);
+        
+        // 访问推广链接
+        const response = await page.goto(affiliateUrl, {
+            waitUntil: 'networkidle2', // 等待网络空闲
+            timeout: 30000
+        });
+        
+        console.log(`[Puppeteer] 页面加载完成，状态: ${response?.status()}`);
+        
+        // 等待一段时间让页面 JavaScript 执行完成（包括 aff 验证 API 调用）
+        await page.waitForTimeout(5000);
+        
+        // 获取页面标题（用于调试）
+        const title = await page.title();
+        console.log(`[Puppeteer] 页面标题: ${title}`);
+        
+        // 获取当前 URL（可能有重定向）
+        const currentUrl = page.url();
+        console.log(`[Puppeteer] 当前 URL: ${currentUrl}`);
+        
+        // 检查是否成功跳转到 banana.listenhub.ai
+        const isSuccess = currentUrl.includes('banana.listenhub.ai');
+        if (isSuccess) {
+            console.log(`[Puppeteer] ✅ 推广链接访问成功，已跳转到 Banana Lab`);
+        } else {
+            console.log(`[Puppeteer] ⚠️ 推广链接可能未生效，当前页面: ${currentUrl}`);
+        }
+        
+        return { success: isSuccess, status: response?.status(), title, url: currentUrl };
+        
+    } catch (error) {
+        console.error(`[Puppeteer] 错误:`, error.message);
+        throw error;
+    } finally {
+        if (browser) {
+            await browser.close();
+            console.log(`[Puppeteer] 浏览器已关闭`);
+        }
+    }
+}
+
 function extractVerificationCode(text) {
     console.log(`[验证码提取] 原始文本长度: ${text?.length || 0}`);
     
@@ -837,17 +940,19 @@ app.get('/api/config', (req, res) => {
         data: {
             moemail: {
                 baseUrl: config.moemail?.baseUrl || '',
+                domain: config.moemail?.domain || '',
                 hasApiKey: !!config.moemail?.apiKey
             },
             fingerprint: config.fingerprint || {},
-            generation: config.generation || {}
+            generation: config.generation || {},
+            affiliate: config.affiliate || { redirectUrl: '' }
         }
     });
 });
 
 // 更新配置
 app.post('/api/config', (req, res) => {
-    const { moemail, fingerprint, generation } = req.body;
+    const { moemail, fingerprint, generation, affiliate } = req.body;
     
     // 重新加载配置以确保最新
     config = loadConfig();
@@ -860,6 +965,9 @@ app.post('/api/config', (req, res) => {
     }
     if (generation) {
         config.generation = { ...config.generation, ...generation };
+    }
+    if (affiliate) {
+        config.affiliate = { ...config.affiliate, ...affiliate };
     }
     
     saveConfig(config);
@@ -1054,11 +1162,24 @@ async function registerOneAccount() {
             return { success: false, message: '验证失败，未获取到 Token', email: emailInfo.email };
         }
         
-        // 6. 获取积分
+        // 6. 访问推广链接（使用 Puppeteer 模拟浏览器访问，建立推广关系）
+        const affiliateUrl = config.affiliate?.redirectUrl || '';
+        if (affiliateUrl) {
+            console.log(`[自动注册] 使用 Puppeteer 访问推广链接: ${affiliateUrl}`);
+            try {
+                await visitAffiliateWithPuppeteer(affiliateUrl, token);
+                console.log(`[自动注册] 推广链接访问完成`);
+            } catch (affError) {
+                console.log(`[自动注册] 推广链接访问失败: ${affError.message}`);
+                // 不影响注册流程，继续执行
+            }
+        }
+        
+        // 7. 获取积分
         console.log(`[自动注册] 获取积分...`);
         let credits = await getCredits(token) || 0;
         
-        // 7. 签到（Banana Lab 签到）
+        // 8. 签到（Banana Lab 签到）
         console.log(`[自动注册] 执行 Banana Lab 签到...`);
         const checkinSuccess = await checkIn(token);
         if (checkinSuccess) {
@@ -1066,7 +1187,7 @@ async function registerOneAccount() {
             credits = await getCredits(token) || credits;
         }
         
-        // 8. 保存账户
+        // 9. 保存账户
         const account = {
             id: Date.now().toString(),
             email: emailInfo.email,
@@ -1086,7 +1207,8 @@ async function registerOneAccount() {
             message: '注册成功',
             email: account.email,
             credits,
-            id: account.id
+            id: account.id,
+            affiliateUrl // 返回推广链接，前端可用于跳转
         };
         
     } catch (error) {
