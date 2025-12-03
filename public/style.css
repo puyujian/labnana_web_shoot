@@ -903,3 +903,155 @@ input[type="checkbox"] {
     height: 18px;
     cursor: pointer;
 }
+
+/* ==================== 账户文件夹折叠样式 ==================== */
+.account-folder {
+    margin-bottom: var(--spacing-md);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    background: var(--bg-card);
+    transition: all 0.3s ease;
+}
+
+.account-folder:hover {
+    border-color: var(--border-hover);
+}
+
+.account-folder-header {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    padding: var(--spacing-md) var(--spacing-lg);
+    background: var(--bg-secondary);
+    cursor: pointer;
+    user-select: none;
+    transition: all 0.2s ease;
+    border-bottom: 1px solid transparent;
+}
+
+.account-folder.expanded .account-folder-header {
+    border-bottom-color: var(--border-color);
+}
+
+.account-folder-header:hover {
+    background: rgba(255, 154, 86, 0.1);
+}
+
+.folder-toggle {
+    font-size: var(--font-size-xs);
+    color: var(--text-muted);
+    transition: transform 0.2s ease;
+    width: 16px;
+    text-align: center;
+}
+
+.folder-icon {
+    font-size: var(--font-size-lg);
+}
+
+.folder-title {
+    flex: 1;
+    font-weight: 600;
+    font-size: var(--font-size-base);
+    color: var(--text-primary);
+}
+
+.folder-badge {
+    padding: var(--spacing-xs) var(--spacing-md);
+    border-radius: var(--radius-sm);
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+    min-width: 32px;
+    text-align: center;
+}
+
+.folder-badge.badge-success {
+    background: rgba(40, 167, 69, 0.2);
+    color: var(--success);
+}
+
+.folder-badge.badge-warning {
+    background: rgba(255, 193, 7, 0.2);
+    color: var(--warning);
+}
+
+.account-folder-content {
+    padding: var(--spacing-sm);
+    animation: slideDown 0.3s ease;
+}
+
+.account-folder.collapsed .account-folder-content {
+    display: none;
+}
+
+@keyframes slideDown {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* 文件夹内的账户项样式微调 */
+.account-folder .account-item {
+    margin: var(--spacing-xs) 0;
+    border-radius: var(--radius-sm);
+}
+
+.account-folder .account-item:first-child {
+    margin-top: 0;
+}
+
+.account-folder .account-item:last-child {
+    margin-bottom: 0;
+}
+
+/* 不可用账户的视觉提示 */
+.account-folder .account-item .account-credits.low {
+    animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+}
+
+/* 账户批量选择样式 */
+.account-item.selected {
+    border-color: var(--accent-primary);
+    background: rgba(255, 154, 86, 0.1);
+}
+
+.account-batch-checkbox {
+    width: 18px;
+    height: 18px;
+    margin-right: var(--spacing-sm);
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+.folder-select-all {
+    width: 16px;
+    height: 16px;
+    margin-right: var(--spacing-xs);
+    cursor: pointer;
+}
+
+.folder-selected-count {
+    font-size: var(--font-size-xs);
+    color: var(--accent-primary);
+    margin-left: var(--spacing-sm);
+}
+
+/* 批量模式下账户项可点击 */
+.account-item[onclick] {
+    cursor: pointer;
+}
+
+.account-item[onclick]:hover {
+    background: rgba(255, 154, 86, 0.15);
+}

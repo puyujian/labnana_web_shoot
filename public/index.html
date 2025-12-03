@@ -99,10 +99,17 @@
                     <button class="btn btn-primary" id="btn-auto-register">🤖 自动注册</button>
                     <div style="display: flex; align-items: center; gap: 6px;">
                         <span style="font-size: 13px; color: rgba(255,255,255,0.6);">数量:</span>
-                        <input type="number" class="input" id="register-count" value="1" min="1" max="10" style="width: 60px; padding: 8px;">
+                        <input type="number" class="input" id="register-count" value="1" min="1" max="20" style="width: 60px; padding: 8px;" title="注册账户数量（1-20）">
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 6px;">
+                        <span style="font-size: 13px; color: rgba(255,255,255,0.6);">并发:</span>
+                        <input type="number" class="input" id="register-concurrency" value="3" min="1" max="5" style="width: 60px; padding: 8px;" title="同时注册的账户数（1-5）">
                     </div>
                     <button class="btn btn-secondary" id="btn-manual-register">🖥️ 手动注册</button>
                     <button class="btn btn-secondary" id="btn-add-token">🔑 添加 Token</button>
+                </div>
+                <div style="margin-top: 8px; font-size: 12px; color: rgba(255,255,255,0.5);">
+                    💡 提示：并发数越高注册越快，但可能触发限流。建议并发数 2-3。
                 </div>
             </div>
             <div class="section">
@@ -117,6 +124,22 @@
                         <button class="btn btn-sm btn-secondary" id="btn-refresh-all">🔄 刷新积分</button>
                     </div>
                 </div>
+                
+                <!-- 账户批量操作栏 -->
+                <div class="account-batch-bar" style="margin-bottom: 12px; padding: 10px; background: rgba(255,255,255,0.05); border-radius: 8px; display: flex; align-items: center; gap: 12px;">
+                    <div class="form-check" style="display: flex; align-items: center; gap: 8px;">
+                        <input type="checkbox" id="toggle-account-batch-mode" style="width: 18px; height: 18px;" onchange="toggleAccountBatchMode(this.checked)">
+                        <label for="toggle-account-batch-mode" style="cursor: pointer; user-select: none;">批量管理模式</label>
+                    </div>
+                    
+                    <div id="account-batch-tools" style="display: none; align-items: center; gap: 12px; margin-left: 12px; border-left: 1px solid rgba(255,255,255,0.2); padding-left: 12px; flex: 1;">
+                        <span style="font-size: 13px; cursor: pointer; color: #ff9a56;" onclick="toggleAllAccountsSelection(true)">全选</span>
+                        <span style="font-size: 13px; cursor: pointer; color: #ff9a56;" onclick="toggleAllAccountsSelection(false)">取消全选</span>
+                        <span id="account-selected-info" style="font-size: 13px; color: #ff9a56; margin-left: auto;">已选: <span id="account-selected-count">0</span></span>
+                        <button class="btn btn-sm btn-danger" id="btn-batch-delete-accounts" onclick="batchDeleteAccounts()" disabled>🗑️ 批量删除</button>
+                    </div>
+                </div>
+                
                 <div class="account-list" id="account-list">
                     <div class="empty-state"><div class="empty-state-icon">👤</div><div>暂无账户</div></div>
                 </div>

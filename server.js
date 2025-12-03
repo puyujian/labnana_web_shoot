@@ -1071,9 +1071,12 @@ app.post('/api/accounts/add', async (req, res) => {
     });
 });
 
-// 自动注册（支持批量）
+// 自动注册（支持批量 + 并发）
+// 参数：
+//   count: 注册数量（1-20）
+//   concurrency: 并发数（1-5，默认 3）
 app.post('/api/accounts/auto-register', async (req, res) => {
-    const { count = 1 } = req.body;
+    const { count = 1, concurrency = 3 } = req.body;
     
     // 重新加载配置以确保最新
     config = loadConfig();
@@ -1082,80 +1085,133 @@ app.post('/api/accounts/auto-register', async (req, res) => {
         return res.json({ success: false, message: '请先配置 MoEmail' });
     }
     
-    const results = [];
-    const registerCount = Math.min(Math.max(1, parseInt(count) || 1), 10); // 最多10个
+    const registerCount = Math.min(Math.max(1, parseInt(count) || 1), 20); // 最多20个
+    const concurrencyLimit = Math.min(Math.max(1, parseInt(concurrency) || 3), 5); // 并发数 1-5
     
-    for (let i = 0; i < registerCount; i++) {
-        console.log(`[自动注册] 开始注册第 ${i + 1}/${registerCount} 个账户...`);
+    console.log(`[自动注册] 开始批量注册: 总数 ${registerCount}, 并发数 ${concurrencyLimit}`);
+    
+    const results = [];
+    const startTime = Date.now();
+    
+    // 创建所有注册任务
+    const tasks = Array.from({ length: registerCount }, (_, i) => ({
+        index: i + 1,
+        status: 'pending'
+    }));
+    
+    // 并发执行注册任务
+    const executeTask = async (task) => {
+        task.status = 'running';
+        console.log(`[自动注册] 开始注册第 ${task.index}/${registerCount} 个账户...`);
         
         try {
-            const result = await registerOneAccount();
-            results.push(result);
+            const result = await registerOneAccount(task.index);
+            task.status = 'completed';
+            task.result = result;
             
             if (result.success) {
-                console.log(`[自动注册] 第 ${i + 1} 个成功: ${result.email}`);
+                console.log(`[自动注册] 第 ${task.index} 个成功: ${result.email}`);
             } else {
-                console.log(`[自动注册] 第 ${i + 1} 个失败: ${result.message}`);
+                console.log(`[自动注册] 第 ${task.index} 个失败: ${result.message}`);
             }
             
-            // 注册间隔
-            if (i < registerCount - 1) {
-                await new Promise(r => setTimeout(r, 3000));
-            }
+            return result;
         } catch (error) {
-            results.push({ success: false, message: error.message });
+            task.status = 'failed';
+            const errorResult = { success: false, message: error.message, index: task.index };
+            task.result = errorResult;
+            console.log(`[自动注册] 第 ${task.index} 个异常: ${error.message}`);
+            return errorResult;
         }
-    }
+    };
     
-    const successCount = results.filter(r => r.success).length;
+    // 使用并发池执行任务
+    const runWithConcurrency = async (tasks, limit) => {
+        const results = [];
+        const executing = new Set();
+        
+        for (const task of tasks) {
+            // 创建任务 Promise
+            const promise = executeTask(task).then(result => {
+                executing.delete(promise);
+                results.push(result);
+                return result;
+            });
+            
+            executing.add(promise);
+            
+            // 如果达到并发限制，等待其中一个完成
+            if (executing.size >= limit) {
+                await Promise.race(executing);
+            }
+        }
+        
+        // 等待所有剩余任务完成
+        await Promise.all(executing);
+        
+        return results;
+    };
+    
+    // 执行并发注册
+    const allResults = await runWithConcurrency(tasks, concurrencyLimit);
+    
+    const successCount = allResults.filter(r => r.success).length;
+    const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+    
+    console.log(`[自动注册] 批量注册完成: ${successCount}/${registerCount} 成功, 耗时 ${duration}秒`);
     
     res.json({
         success: successCount > 0,
-        message: `注册完成: ${successCount}/${registerCount} 成功`,
-        data: { results, successCount, totalCount: registerCount }
+        message: `注册完成: ${successCount}/${registerCount} 成功 (耗时 ${duration}秒)`,
+        data: {
+            results: allResults,
+            successCount,
+            totalCount: registerCount,
+            concurrency: concurrencyLimit,
+            duration: parseFloat(duration)
+        }
     });
 });
 
 // 单个账户注册逻辑
-async function registerOneAccount() {
+// taskIndex: 任务序号（用于日志区分）
+async function registerOneAccount(taskIndex = 1) {
+    // 每个任务使用独立的 MoEmail 客户端实例
     const moemail = new MoeMailClient(config.moemail.baseUrl, config.moemail.apiKey);
+    const logPrefix = `[注册#${taskIndex}]`;
     
     try {
         // 1. 生成临时邮箱
-        console.log(`[自动注册] 正在生成临时邮箱...`);
+        console.log(`${logPrefix} 正在生成临时邮箱...`);
         const emailInfo = await moemail.generateEmail();
-        console.log(`[自动注册] 生成邮箱: ${emailInfo.email}, ID: ${emailInfo.id}`);
+        console.log(`${logPrefix} 生成邮箱: ${emailInfo.email}`);
         
         // 2. 发送验证码
-        console.log(`[自动注册] 正在发送验证码到 ${emailInfo.email}...`);
+        console.log(`${logPrefix} 正在发送验证码...`);
         const sendResult = await sendVerificationCode(emailInfo.email);
-        console.log(`[自动注册] 发送验证码结果:`, sendResult);
+        if (!sendResult.success) {
+            return { success: false, message: `发送验证码失败: ${sendResult.message || '未知错误'}`, email: emailInfo.email };
+        }
         
-        // 3. 等待邮件（增加超时时间到 60 秒，轮询间隔 3 秒）
-        console.log(`[自动注册] 等待验证邮件...`);
-        const message = await moemail.waitForEmail(emailInfo.id, 60000, 3000);
+        // 3. 等待邮件（增加超时时间到 90 秒，轮询间隔 3 秒）
+        console.log(`${logPrefix} 等待验证邮件...`);
+        const message = await moemail.waitForEmail(emailInfo.id, 90000, 3000);
         if (!message) {
             return { success: false, message: '等待验证邮件超时', email: emailInfo.email };
         }
         
-        // 打印完整的邮件对象用于调试
-        console.log(`[自动注册] 收到邮件对象:`, JSON.stringify(message, null, 2));
-        
         // 4. 提取验证码 - 尝试多个可能的字段
         const emailContent = message.text || message.html || message.body || message.content || '';
-        console.log(`[自动注册] 邮件内容长度: ${emailContent.length}`);
-        
         const code = extractVerificationCode(emailContent);
         if (!code) {
-            console.log(`[自动注册] 无法提取验证码，邮件内容:`, emailContent.substring(0, 500));
+            console.log(`${logPrefix} 无法提取验证码，邮件内容:`, emailContent.substring(0, 300));
             return { success: false, message: '无法从邮件中提取验证码', email: emailInfo.email };
         }
-        console.log(`[自动注册] 验证码: ${code}`);
+        console.log(`${logPrefix} 验证码: ${code}`);
         
         // 5. 验证并获取 Token
-        console.log(`[自动注册] 正在验证...`);
+        console.log(`${logPrefix} 正在验证...`);
         const authResult = await verifyCode(emailInfo.email, code);
-        console.log(`[自动注册] 验证结果:`, JSON.stringify(authResult).substring(0, 200));
         
         const token = authResult.accessToken || authResult.access_token || authResult.token;
         if (!token) {
@@ -1165,31 +1221,30 @@ async function registerOneAccount() {
         // 6. 访问推广链接（使用 Puppeteer 模拟浏览器访问，建立推广关系）
         const affiliateUrl = config.affiliate?.redirectUrl || '';
         if (affiliateUrl) {
-            console.log(`[自动注册] 使用 Puppeteer 访问推广链接: ${affiliateUrl}`);
+            console.log(`${logPrefix} 访问推广链接...`);
             try {
                 await visitAffiliateWithPuppeteer(affiliateUrl, token);
-                console.log(`[自动注册] 推广链接访问完成`);
+                console.log(`${logPrefix} 推广链接访问完成`);
             } catch (affError) {
-                console.log(`[自动注册] 推广链接访问失败: ${affError.message}`);
+                console.log(`${logPrefix} 推广链接访问失败: ${affError.message}`);
                 // 不影响注册流程，继续执行
             }
         }
         
         // 7. 获取积分
-        console.log(`[自动注册] 获取积分...`);
+        console.log(`${logPrefix} 获取积分...`);
         let credits = await getCredits(token) || 0;
         
         // 8. 签到（Banana Lab 签到）
-        console.log(`[自动注册] 执行 Banana Lab 签到...`);
+        console.log(`${logPrefix} 执行签到...`);
         const checkinSuccess = await checkIn(token);
         if (checkinSuccess) {
-            console.log(`[自动注册] 签到成功，重新获取积分...`);
             credits = await getCredits(token) || credits;
         }
         
-        // 9. 保存账户
+        // 9. 保存账户（使用唯一 ID 避免并发冲突）
         const account = {
-            id: Date.now().toString(),
+            id: `${Date.now()}_${taskIndex}_${Math.random().toString(36).substring(2, 8)}`,
             email: emailInfo.email,
             token,
             credits,
@@ -1197,10 +1252,12 @@ async function registerOneAccount() {
             createdAt: new Date().toISOString()
         };
         
+        // 重新加载数据以避免并发写入冲突
+        data = loadData();
         data.accounts.push(account);
         saveData(data);
         
-        console.log(`[自动注册] 成功! 邮箱: ${account.email}, 积分: ${credits}`);
+        console.log(`${logPrefix} ✅ 成功! 邮箱: ${account.email}, 积分: ${credits}`);
         
         return {
             success: true,
@@ -1208,12 +1265,12 @@ async function registerOneAccount() {
             email: account.email,
             credits,
             id: account.id,
-            affiliateUrl // 返回推广链接，前端可用于跳转
+            index: taskIndex
         };
         
     } catch (error) {
-        console.error('[自动注册] 错误:', error);
-        return { success: false, message: error.message };
+        console.error(`${logPrefix} 错误:`, error.message);
+        return { success: false, message: error.message, index: taskIndex };
     }
 }
 
@@ -1223,6 +1280,36 @@ app.delete('/api/accounts/:id', (req, res) => {
     data.accounts = data.accounts.filter(a => a.id !== id);
     saveData(data);
     res.json({ success: true, message: '账户已删除' });
+});
+
+// 批量删除账户
+app.post('/api/accounts/batch-delete', (req, res) => {
+    const { accountIds } = req.body;
+    
+    if (!accountIds || !Array.isArray(accountIds) || accountIds.length === 0) {
+        return res.json({ success: false, message: '请选择要删除的账户' });
+    }
+    
+    const beforeCount = data.accounts.length;
+    
+    // 过滤掉要删除的账户
+    data.accounts = data.accounts.filter(a => !accountIds.includes(a.id));
+    
+    const deletedCount = beforeCount - data.accounts.length;
+    const failedCount = accountIds.length - deletedCount;
+    
+    saveData(data);
+    
+    console.log(`[账户] 批量删除: ${deletedCount} 成功, ${failedCount} 失败`);
+    
+    res.json({
+        success: deletedCount > 0,
+        message: `删除完成: ${deletedCount}/${accountIds.length} 成功`,
+        data: {
+            successCount: deletedCount,
+            failedCount: failedCount
+        }
+    });
 });
 
 // 刷新账户积分

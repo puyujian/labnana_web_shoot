@@ -11,7 +11,9 @@ let state = {
     nextConfigId: 2,
     concurrentTask: null,
     isBatchMode: false,
-    selectedImages: new Set() // 存储格式: "id|accountId"
+    selectedImages: new Set(), // 存储格式: "id|accountId"
+    isAccountBatchMode: false, // 账户批量管理模式
+    selectedAccounts: new Set() // 选中的账户 ID
 };
 
 // 日志函数
@@ -160,30 +162,207 @@ async function loadImages(page = 1) {
     }
 }
 
-// 渲染账户列表
+// 渲染账户列表（按积分分类折叠）
 function renderAccounts() {
     const container = document.getElementById('account-list');
     if (state.accounts.length === 0) {
         container.innerHTML = '<div class="empty-state"><div class="empty-state-icon">👤</div><div>暂无账户</div></div>';
         return;
     }
-    container.innerHTML = state.accounts.map(account => `
-        <div class="account-item">
-            <div class="account-info">
-                <div class="account-email">${account.email}</div>
-                <div class="account-meta">
-                    <span class="account-credits ${account.credits < 15 ? 'low' : ''}">${account.credits} 积分</span>
-                    <span>签到: ${account.lastCheckIn ? new Date(account.lastCheckIn).toLocaleDateString() : '未签到'}</span>
+    
+    // 按积分分类
+    const availableAccounts = state.accounts.filter(a => a.credits >= 15);
+    const unavailableAccounts = state.accounts.filter(a => a.credits < 15);
+    
+    // 初始化折叠状态（如果未设置）
+    if (state.accountFolderState === undefined) {
+        state.accountFolderState = {
+            available: true,  // 默认展开可用
+            unavailable: false // 默认折叠不可用
+        };
+    }
+    
+    const renderAccountItem = (account) => {
+        const isSelected = state.selectedAccounts.has(account.id);
+        const checkboxHtml = state.isAccountBatchMode
+            ? `<input type="checkbox" class="account-batch-checkbox" ${isSelected ? 'checked' : ''} onclick="event.stopPropagation(); toggleAccountSelection('${account.id}')">`
+            : '';
+        
+        return `
+            <div class="account-item ${isSelected ? 'selected' : ''}" ${state.isAccountBatchMode ? `onclick="toggleAccountSelection('${account.id}')"` : ''}>
+                ${checkboxHtml}
+                <div class="account-info">
+                    <div class="account-email">${account.email}</div>
+                    <div class="account-meta">
+                        <span class="account-credits ${account.credits < 15 ? 'low' : ''}">${account.credits} 积分</span>
+                        <span>签到: ${account.lastCheckIn ? new Date(account.lastCheckIn).toLocaleDateString() : '未签到'}</span>
+                    </div>
+                </div>
+                <div class="account-actions" ${state.isAccountBatchMode ? 'style="display:none;"' : ''}>
+                    <button class="btn btn-sm btn-secondary" onclick="checkinAccount('${account.id}')">📅 签到</button>
+                    <button class="btn btn-sm btn-secondary" onclick="refreshAccount('${account.id}')">🔄</button>
+                    <button class="btn btn-sm btn-danger" onclick="deleteAccount('${account.id}')">🗑️</button>
                 </div>
             </div>
-            <div class="account-actions">
-                <button class="btn btn-sm btn-secondary" onclick="checkinAccount('${account.id}')">📅 签到</button>
-                <button class="btn btn-sm btn-secondary" onclick="refreshAccount('${account.id}')">🔄</button>
-                <button class="btn btn-sm btn-danger" onclick="deleteAccount('${account.id}')">🗑️</button>
+        `;
+    };
+    
+    const renderFolder = (title, accounts, folderId, icon, isExpanded, badgeClass = '') => {
+        if (accounts.length === 0) return '';
+        
+        // 计算该文件夹中选中的数量
+        const selectedInFolder = accounts.filter(a => state.selectedAccounts.has(a.id)).length;
+        const selectAllChecked = state.isAccountBatchMode && selectedInFolder === accounts.length;
+        
+        return `
+            <div class="account-folder ${isExpanded ? 'expanded' : 'collapsed'}">
+                <div class="account-folder-header" onclick="toggleAccountFolder('${folderId}')">
+                    ${state.isAccountBatchMode ? `
+                        <input type="checkbox" class="folder-select-all" ${selectAllChecked ? 'checked' : ''}
+                               onclick="event.stopPropagation(); toggleFolderSelection('${folderId}', this.checked)">
+                    ` : ''}
+                    <span class="folder-toggle">${isExpanded ? '▼' : '▶'}</span>
+                    <span class="folder-icon">${icon}</span>
+                    <span class="folder-title">${title}</span>
+                    <span class="folder-badge ${badgeClass}">${accounts.length}</span>
+                    ${state.isAccountBatchMode && selectedInFolder > 0 ? `<span class="folder-selected-count">(已选 ${selectedInFolder})</span>` : ''}
+                </div>
+                <div class="account-folder-content" style="display: ${isExpanded ? 'block' : 'none'};">
+                    ${accounts.map(renderAccountItem).join('')}
+                </div>
             </div>
-        </div>
-    `).join('');
+        `;
+    };
+    
+    container.innerHTML =
+        renderFolder('✅ 可用账户', availableAccounts, 'available', '📂', state.accountFolderState.available, 'badge-success') +
+        renderFolder('⚠️ 任务不可用 (积分<15)', unavailableAccounts, 'unavailable', '📁', state.accountFolderState.unavailable, 'badge-warning');
+    
+    // 更新批量操作栏的选中计数
+    updateAccountBatchUI();
 }
+
+// 切换账户文件夹折叠状态
+function toggleAccountFolder(folderId) {
+    if (!state.accountFolderState) {
+        state.accountFolderState = { available: true, unavailable: false };
+    }
+    state.accountFolderState[folderId] = !state.accountFolderState[folderId];
+    renderAccounts();
+}
+
+// ==================== 账户批量管理 ====================
+
+// 切换账户批量管理模式
+function toggleAccountBatchMode(enabled) {
+    state.isAccountBatchMode = enabled;
+    state.selectedAccounts.clear();
+    renderAccounts();
+    updateAccountBatchUI();
+}
+
+// 切换单个账户选择
+function toggleAccountSelection(accountId) {
+    if (state.selectedAccounts.has(accountId)) {
+        state.selectedAccounts.delete(accountId);
+    } else {
+        state.selectedAccounts.add(accountId);
+    }
+    renderAccounts();
+}
+
+// 切换文件夹内所有账户选择
+function toggleFolderSelection(folderId, select) {
+    const accounts = folderId === 'available'
+        ? state.accounts.filter(a => a.credits >= 15)
+        : state.accounts.filter(a => a.credits < 15);
+    
+    accounts.forEach(account => {
+        if (select) {
+            state.selectedAccounts.add(account.id);
+        } else {
+            state.selectedAccounts.delete(account.id);
+        }
+    });
+    
+    renderAccounts();
+}
+
+// 全选/取消全选所有账户
+function toggleAllAccountsSelection(select) {
+    if (select) {
+        state.accounts.forEach(a => state.selectedAccounts.add(a.id));
+    } else {
+        state.selectedAccounts.clear();
+    }
+    renderAccounts();
+}
+
+// 更新账户批量操作 UI
+function updateAccountBatchUI() {
+    const countEl = document.getElementById('account-selected-count');
+    if (countEl) {
+        countEl.textContent = state.selectedAccounts.size;
+    }
+    
+    const batchTools = document.getElementById('account-batch-tools');
+    if (batchTools) {
+        batchTools.style.display = state.isAccountBatchMode ? 'flex' : 'none';
+    }
+    
+    const batchDeleteBtn = document.getElementById('btn-batch-delete-accounts');
+    if (batchDeleteBtn) {
+        batchDeleteBtn.disabled = state.selectedAccounts.size === 0;
+    }
+}
+
+// 批量删除账户
+async function batchDeleteAccounts() {
+    if (state.selectedAccounts.size === 0) {
+        regLog('请先选择要删除的账户', 'error');
+        return;
+    }
+    
+    const count = state.selectedAccounts.size;
+    if (!confirm(`⚠️ 警告：确定要永久删除选中的 ${count} 个账户吗？\n此操作不可恢复！`)) {
+        return;
+    }
+    
+    regLog(`正在批量删除 ${count} 个账户...`);
+    
+    const accountIds = Array.from(state.selectedAccounts);
+    
+    const result = await api('/api/accounts/batch-delete', {
+        method: 'POST',
+        body: JSON.stringify({ accountIds })
+    });
+    
+    if (result.success) {
+        const { successCount, failedCount } = result.data;
+        regLog(`批量删除完成: ${successCount} 成功, ${failedCount} 失败`, successCount > 0 ? 'success' : 'error');
+        
+        // 清空选择并退出批量模式
+        state.selectedAccounts.clear();
+        state.isAccountBatchMode = false;
+        
+        // 更新复选框状态
+        const toggleCheckbox = document.getElementById('toggle-account-batch-mode');
+        if (toggleCheckbox) toggleCheckbox.checked = false;
+        
+        // 刷新账户列表
+        loadStatus();
+    } else {
+        regLog(`批量删除失败: ${result.message}`, 'error');
+    }
+}
+
+// 暴露给全局
+window.toggleAccountFolder = toggleAccountFolder;
+window.toggleAccountBatchMode = toggleAccountBatchMode;
+window.toggleAccountSelection = toggleAccountSelection;
+window.toggleFolderSelection = toggleFolderSelection;
+window.toggleAllAccountsSelection = toggleAllAccountsSelection;
+window.batchDeleteAccounts = batchDeleteAccounts;
 
 // 渲染图片列表（支持状态显示）
 function renderImages() {
@@ -800,37 +979,56 @@ function updateTaskUI(isRunning) {
     inputs.forEach(el => el.disabled = isRunning);
 }
 
-// 自动注册
+// 自动注册（支持并发）
 async function autoRegister() {
     const count = parseInt(document.getElementById('register-count').value) || 1;
-    regLog(`正在自动注册 ${count} 个账户...`);
-    log(`正在自动注册 ${count} 个账户...`);
+    const concurrency = parseInt(document.getElementById('register-concurrency')?.value) || 3;
     
-    const result = await api('/api/accounts/auto-register', {
-        method: 'POST',
-        body: JSON.stringify({ count })
-    });
+    regLog(`🚀 开始批量注册: ${count} 个账户, 并发数 ${concurrency}...`);
+    log(`🚀 开始批量注册: ${count} 个账户, 并发数 ${concurrency}...`);
     
-    if (result.success) {
-        const data = result.data;
-        regLog(`注册完成: ${data.successCount}/${data.totalCount} 成功`, 'success');
-        log(`注册完成: ${data.successCount}/${data.totalCount} 成功`, 'success');
+    // 禁用按钮防止重复点击
+    const btn = document.getElementById('btn-auto-register');
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = '⏳ 注册中...';
+    }
+    
+    try {
+        const result = await api('/api/accounts/auto-register', {
+            method: 'POST',
+            body: JSON.stringify({ count, concurrency })
+        });
         
-        // 显示每个结果
-        if (data.results) {
-            data.results.forEach((r, i) => {
-                if (r.success) {
-                    regLog(`  ${i+1}. ✅ ${r.email} (${r.credits}积分)`, 'success');
-                } else {
-                    regLog(`  ${i+1}. ❌ ${r.message}`, 'error');
-                }
-            });
+        if (result.success) {
+            const data = result.data;
+            const durationText = data.duration ? ` (耗时 ${data.duration}秒)` : '';
+            regLog(`✅ 注册完成: ${data.successCount}/${data.totalCount} 成功${durationText}`, 'success');
+            log(`✅ 注册完成: ${data.successCount}/${data.totalCount} 成功${durationText}`, 'success');
+            
+            // 显示每个结果
+            if (data.results) {
+                data.results.forEach((r) => {
+                    const idx = r.index || '?';
+                    if (r.success) {
+                        regLog(`  #${idx} ✅ ${r.email} (${r.credits}积分)`, 'success');
+                    } else {
+                        regLog(`  #${idx} ❌ ${r.message}`, 'error');
+                    }
+                });
+            }
+            
+            loadStatus();
+        } else {
+            regLog(`❌ 注册失败: ${result.message}`, 'error');
+            log(`❌ 注册失败: ${result.message}`, 'error');
         }
-        
-        loadStatus();
-    } else {
-        regLog(`注册失败: ${result.message}`, 'error');
-        log(`注册失败: ${result.message}`, 'error');
+    } finally {
+        // 恢复按钮状态
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = '🤖 自动注册';
+        }
     }
 }
 
