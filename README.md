@@ -304,23 +304,6 @@ banana-web/
 
 MIT License
 
-## 📤 发布指南
-
-如果你想将此项目发布到 GitHub 或分享给他人，请注意以下事项：
-
-1.  **敏感信息**：
-    - `data.json` 包含你的账户 Token，**绝对不要**上传。
-    - `config.json` 包含你的 API Key，**绝对不要**上传。
-    - 请使用 `.gitignore` 排除这些文件。
-
-2.  **发布文件清单**：
-    - `banana-web/` (整个文件夹)
-    - 包含 `start.bat` 和 `start.sh`
-    - 包含 `README.md`
-
-3.  **首次运行**：
-    - 用户下载后，需要将 `banana-web/config.json.example` 复制为 `banana-web/config.json` 并填入配置。
-    - 启动脚本会自动安装依赖。
 
 ## 🤝 贡献
 
@@ -328,4 +311,4 @@ MIT License
 
 ---
 
-Made with ❤️ by Roo Code 🐱
+Made with ❤️ by 苏糖 🐱
