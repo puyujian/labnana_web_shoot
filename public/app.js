@@ -740,6 +740,12 @@ function renderConfigs() {
                         </select>
                     </div>
                 </div>
+                <div class="form-group" style="margin-top: 8px;">
+                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none;">
+                        <input type="checkbox" onchange="updateConfig(${config.id}, 'isPublic', this.checked)" ${config.isPublic ? 'checked' : ''} style="width: 16px; height: 16px;">
+                        <span style="font-size: 14px; color: rgba(255,255,255,0.8);">公开到图库</span>
+                    </label>
+                </div>
             </div>
         </div>
     `).join('');
@@ -752,7 +758,8 @@ function addConfig() {
         prompt: '',
         imageSize: '2K',
         aspectRatio: '1:1',
-        referenceImageUrls: []
+        referenceImageUrls: [],
+        isPublic: false
     });
     renderConfigs();
 }

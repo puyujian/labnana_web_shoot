@@ -232,7 +232,8 @@ class ConcurrentTask {
                 prompt: config.prompt,
                 imageSize: config.imageSize,
                 aspectRatio: config.aspectRatio,
-                referenceImageUrls: config.referenceImageUrls
+                referenceImageUrls: config.referenceImageUrls,
+                isPublic: config.isPublic
             });
             
             // 检查 API 响应
@@ -250,7 +251,8 @@ class ConcurrentTask {
                         prompt: config.prompt,
                         imageSize: config.imageSize,
                         aspectRatio: config.aspectRatio,
-                        referenceImageUrls: config.referenceImageUrls
+                        referenceImageUrls: config.referenceImageUrls,
+                        isPublic: config.isPublic
                     });
                     
                     // 如果重试成功，覆盖 result 并继续
@@ -697,7 +699,7 @@ async function generateImage(token, params) {
         prompt: params.prompt,
         imageSize: params.imageSize || '2K',
         aspectRatio: params.aspectRatio || '1:1',
-        isPublic: false
+        isPublic: params.isPublic ?? false
     };
     if (params.referenceImageUrls?.length > 0) {
         body.referenceImageUrls = params.referenceImageUrls;
